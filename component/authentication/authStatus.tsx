@@ -2,14 +2,8 @@
 
 "use client";
 
-import { Session } from "next-auth";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useEffect } from "react";
-
-type session = Session & {
-  error:string; // Describes errors, like token refresh failure.
-  grant_Type:string; //
-}
 
 //Handles Keycloak logout by calling the /api/auth/logout endpoint.
 export const keycloakSessionLogout = async () => {
@@ -23,12 +17,14 @@ export const keycloakSessionLogout = async () => {
 const AuthStatus = () => {
   const { data: session, status } = useSession();
 
-  //Automatically logs the user out if there's a RefreshAccessTokenError
-  useEffect(()=>{
-    if(status != "loading" && session && (session as session)?.error === "RefreshAccessTokenError") {
-      signOut({callbackUrl: "/"});
-    }
-  },[session, status])
+  useEffect(() => {
+    if (
+      status !== "loading" &&
+      session &&
+      session?.error === "RefreshAccessTokenError"
+    )
+      signOut({ callbackUrl: "/" });
+  }, [status, session]);
 
   if (status === "loading") {
     return <div>Loading...</div>;

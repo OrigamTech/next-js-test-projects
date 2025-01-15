@@ -1,44 +1,22 @@
-// description of code: This code sets up authentication for a Next.js application using NextAuth.js with Keycloak as the authentication provider. The main goal is to authenticate users, manage their sessions, and handle token lifeCycles, including refreshing expired tokens.
-
-import NextAuth, { NextAuthOptions, Session } from "next-auth";
+import NextAuth from "next-auth";
 import KeycloakProvider from "next-auth/providers/keycloak";
 import { jwtDecode } from "jwt-decode";
 import { encrypt } from "@/utils/encryption";
-
-// Define a type for the token object
-type CustomToken = {
-  access_token: string; // The main token for accessing resources.
-  refresh_token: string; // Used to request a new access token when expired.
-  decoded: any; // Decoded JWT payload containing user info and roles.
-  token_id: string; // Unique ID for the token (from Keycloak).
-  expires_at: number; // UNIX timestamp when the token expires.
-  roles?: string[]; // Array of roles assigned to the user.
-  error: string; // Describes errors during token operations (if any).
-  grant_type?: string; //
-};
-
-declare module "next-auth" {
-  interface Session {
-    access_token: string; // Encrypted access token.
-    token_id: string; // Encrypted token ID.
-    roles?: string[]; // User roles.
-    error: string; // Error if token refresh fails.
-  }
-}
 
 // console.log("Client ID:", process.env.TEST_KEYCLOAK_CLIENT_ID);
 // console.log("Client Secret:", process.env.TEST_KEYCLOAK_CLIENT_SECRET);
 // console.log("Keycloak URL:", process.env.KEYCLOAK_URL);
 // console.log("Keycloak Realm:", process.env.KEYCLOAK_REALM);
 // console.log("Refresh Token URL:", process.env.REFRESH_TOKEN_URL);
+// console.log("next auth secret:", process.env.NEXTAUTH_SECRET);
 
-// This will refresh an expired access token when needed
-export const refreshAccessToken = async (token: CustomToken) => {
+// // This will refresh an expired access token when needed
+export const refreshAccessToken = async (token: any) => {
   const response = await fetch(`${process.env.REFRESH_TOKEN_URL}`, {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      clientId: `${process.env.TEST_KEYCLOAK_CLIENT_ID}`,
-      clientSecret: `${process.env.TEST_KEYCLOAK_CLIENT_SECRET}`,
+      client_id: `${process.env.TEST_KEYCLOAK_CLIENT_ID}`,
+      client_secret: `${process.env.TEST_KEYCLOAK_CLIENT_SECRET}`,
       grant_type: "refresh_token",
       refresh_token: token.refresh_token,
     }),
@@ -47,107 +25,79 @@ export const refreshAccessToken = async (token: CustomToken) => {
   });
 
   const refreshToken = await response.json();
-  console.log('Token successfully refreshed:', refreshToken);
+  // console.log('Token successfully refreshed:', refreshToken);
+
+  // Log client ID when refreshing token
+  // console.log("Refreshing token. Client ID:", process.env.TEST_KEYCLOAK_CLIENT_ID);
 
   if (!response.ok) throw refreshToken;
-
 
   return {
     ...token,
     access_token: refreshToken.access_token,
     decoded: jwtDecode(refreshToken.access_token),
-    token_id: refreshToken.token_id,
+    id_token: refreshToken.id_token,
     expires_at: Math.floor(Date.now() / 1000) + refreshToken.expires_in,
     refresh_token: refreshToken.refresh_token,
   };
 };
 
-export const authOptions: NextAuthOptions = {
+export const authOptions = {
   providers: [
     KeycloakProvider({
       clientId: `${process.env.TEST_KEYCLOAK_CLIENT_ID}`,
       clientSecret: `${process.env.TEST_KEYCLOAK_CLIENT_SECRET}`,
       issuer: `${process.env.KEYCLOAK_URL}/realms/${process.env.KEYCLOAK_REALM}`,
-      authorization: {
-        params: {
-          grant_type: "authorization_code",
-          scope: "openid profile email", //scope: Specifies the data requested during login.
-          response_type: "code",
-        },
-      },
-      httpOptions: {
-        timeout: 5000, // Request timeout in milliseconds
-      },
     }),
   ],
 
   //Functions to control token and session behavior.
   callbacks: {
-    async jwt({
-      token,
-      user,
-      account,
-      profile,
-      trigger,
-      isNewUser,
-      session,
-    }: {
-      token: any;
-      user: any;
-      account: any;
-      profile?: any;
-      trigger?: "signIn" | "signUp" | "update";
-      isNewUser?: boolean;
-      session?: any;
-    }): Promise<any> {
-      let roles: string[] | undefined = undefined;
+    async jwt({ token, account }: { token: any; account: any }) {
       const nowTimeStamp = Math.floor(Date.now());
+
+      // Log the account object to inspect its contents
+      // console.log("Account object during login:", account);
 
       //first time login
       if (account) {
+        // console.log("Sign-In Client ID:", process.env.TEST_KEYCLOAK_CLIENT_ID);
         token.decoded = jwtDecode(account.access_token);
         token.access_token = account.access_token;
-        token.token_id = account.token_id;
+        token.id_token = account.id_token;
         token.expires_at = account.expires_at;
         token.refresh_token = account.refresh_token;
-        token.roles = token.decoded.realm_access?.roles;
-        console.log("access_token", token.decoded);
+        // console.log("access_token", token.decoded);
 
         return token;
       } else if (nowTimeStamp < token.expires_at) {
-        return token; // Return token if not expired
+        return token;
       } else {
         //token is expired, try to refresh it
         console.log("token has expired. refreshing token...");
 
         try {
           const refreshedToken = await refreshAccessToken(token);
-          console.log("Token is refreshed");
+          console.log("token is refreshed");
           return refreshedToken;
         } catch (error) {
-          console.error("Error refreshing the access token", error);
+          console.error("Error refreshing access token", error); //**the error message that says --"invalid_client"-- is here**
           return { ...token, error: "RefreshAccessTokenError" };
         }
       }
     },
-    async session({
-      session,
-      token,
-      user,
-      newSession,
-      trigger,
-    }: {
-      session: Session;
-      token: any;
-      user: any;
-      newSession: any;
-      trigger: "update";
-    }): Promise<Session> {
+
+    async session({ session, token }: { session: any; token: any }) {
+      // console.log("token.access_token",token.access_token)
+      // console.log("Token in session callback:", token);
+      // console.log("token : ",token);
+
       session.access_token = encrypt(token.access_token);
-      session.token_id = encrypt(token.token_id);
+      session.id_token = encrypt(token.id_token);
       session.roles = token.roles; // Assign roles from token to session
       session.error = token.error;
-      console.log("access_token", session.access_token);
+      // console.log("session: ", session.access_token);
+
       return session;
     },
   },
