@@ -1,0 +1,20 @@
+# Node modules
+node_modules
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Build artifacts
+.next
+out
+
+# Editor settings
+.vscode
+.idea
+
+# Logs
+*.log
+*.tmp
+*.cache
